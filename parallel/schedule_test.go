@@ -23,7 +23,7 @@ func TestSchedule(t *testing.T) {
 		AddDependency(s5, s6).
 		AddDependency(s3, s6).
 		AddDependency(s4, s6)
-
+	// scheduler.GenerateGraphTB("")
 	err := scheduler.Launch(context.Background()) // 启动！
 	if err != nil {
 		fmt.Println("error:", err)
