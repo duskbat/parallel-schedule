@@ -3,30 +3,30 @@
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[English](README_EN.md)
+[中文](README_CN.md)
 
-轻量级 Go 并行任务调度框架，基于 DAG（有向无环图）自动分析依赖关系，最大限度并行执行任务。
+A lightweight Go parallel task scheduling framework based on DAG (Directed Acyclic Graph) that automatically analyzes dependencies and maximizes parallel execution.
 
-## 特性
+## Features
 
-- **自动调度** — 只需定义依赖关系，框架自动进行拓扑排序并最大化并行执行
-- **动态拓扑排序** — 非 BFS 分层执行，避免层间阻塞，提升并发度
-- **环检测** — 启动前 DFS 检测循环依赖，快速失败
-- **错误中断** — 任一步骤失败后不再触发新的后续步骤，返回错误
-- **Panic 恢复** — goroutine 内 panic 被捕获并转为 error 返回
-- **依赖图生成** — 一键生成 Mermaid 流程图，可视化依赖关系
+- **Auto Scheduling** — Just define dependencies, the framework automatically performs topological sorting and maximizes parallel execution
+- **Dynamic Topological Sort** — Not BFS layer-by-layer execution, avoids inter-layer blocking and improves concurrency
+- **Cycle Detection** — DFS cycle detection before launch, fail fast
+- **Error Interruption** — When any step fails, no new subsequent steps are triggered, error is returned
+- **Panic Recovery** — Panics inside goroutines are captured and converted to errors
+- **Dependency Graph Generation** — Generate Mermaid flowcharts to visualize dependencies
 
-## 安装
+## Installation
 
 ```bash
 go get github.com/duskbat/parallel-schedule
 ```
 
-## 快速开始
+## Quick Start
 
-### 1. 定义数据总线
+### 1. Define Data Bus
 
-数据总线用于在各步骤之间传递数据，由使用方自定义：
+The data bus is used to pass data between steps, defined by the user:
 
 ```go
 type MyDataBus struct {
@@ -36,9 +36,9 @@ type MyDataBus struct {
 }
 ```
 
-### 2. 实现 Step 接口
+### 2. Implement Step Interface
 
-每个步骤实现 `Step` 接口，**注意每个步骤必须是不同的类型**（类型名作为调度 key）：
+Each step implements the `Step` interface. **Note that each step must be a distinct type** (the type name is used as the scheduling key):
 
 ```go
 type StepFetchUser struct {
@@ -46,7 +46,6 @@ type StepFetchUser struct {
 }
 
 func (s *StepFetchUser) Process(ctx context.Context) error {
-    // 执行具体逻辑，如 RPC 调用、数据库查询等
     s.Data.UserName = "Alice"
     return nil
 }
@@ -61,7 +60,7 @@ func (s *StepFetchOrder) Process(ctx context.Context) error {
 }
 ```
 
-### 3. 定义依赖并启动
+### 3. Define Dependencies and Launch
 
 ```go
 bus := &MyDataBus{UserID: 1}
@@ -71,8 +70,8 @@ s2 := &StepFetchOrder{Data: bus}
 s3 := &StepNotify{Data: bus}
 
 err := parallel.InitScheduler().
-    AddDependency(s1, s2).  // s1 完成后执行 s2
-    AddDependency(s1, s3).  // s1 完成后执行 s3（s2、s3 并行）
+    AddDependency(s1, s2).  // s2 runs after s1
+    AddDependency(s1, s3).  // s3 runs after s1 (s2 and s3 run in parallel)
     Launch(context.Background())
 
 if err != nil {
@@ -80,7 +79,7 @@ if err != nil {
 }
 ```
 
-上述依赖关系对应的执行流程：
+Execution flow for the above dependencies:
 
 ```mermaid
 flowchart LR
@@ -88,45 +87,45 @@ flowchart LR
     StepFetchUser --> StepNotify
 ```
 
-### 4. 生成依赖图（可选）
+### 4. Generate Dependency Graph (Optional)
 
-开发调试时可生成 Mermaid 流程图文件：
+Generate Mermaid flowchart files during development:
 
 ```go
 scheduler := parallel.InitScheduler().
     AddDependency(s1, s2).
     AddDependency(s1, s3)
 
-scheduler.GenerateGraphLR("graph.md") // 从左到右
-scheduler.GenerateGraphTB("graph.md") // 从上到下
+scheduler.GenerateGraphLR("graph.md") // left to right
+scheduler.GenerateGraphTB("graph.md") // top to bottom
 ```
 
-> 生成完成后请删除 `GenerateGraph` 调用，该方法会调用 `os.Exit(1)`。
+> Remove the `GenerateGraph` call after generation, as it calls `os.Exit(1)`.
 
-## 设计原理
+## Design
 
-### 调度流程
+### Scheduling Flow
 
-1. 构建邻接表和入度表
-2. DFS 检测循环依赖
-3. 启动所有入度为 0 的节点（无依赖的节点并行执行）
-4. 节点完成后放入完成队列（channel），消费队列触发后续节点
-5. 邻接节点入度减为 0 时立即异步执行
-6. 所有节点完成或出现 error 时结束
+1. Build adjacency list and in-degree table
+2. DFS cycle detection
+3. Launch all nodes with in-degree 0 (nodes without dependencies run in parallel)
+4. Completed nodes are put into a finish queue (channel), consuming the queue triggers subsequent nodes
+5. Adjacent nodes are executed asynchronously as soon as their in-degree reaches 0
+6. Ends when all nodes complete or an error occurs
 
-### 为什么不用 BFS
+### Why Not BFS
 
-BFS 按层执行，每层之间存在同步阻塞。本框架采用动态拓扑排序，节点完成即触发后续，每个节点的实际执行时长动态影响调度顺序，最大化并行度。
+BFS executes layer by layer with synchronization blocking between layers. This framework uses dynamic topological sorting — completed nodes immediately trigger successors, and each node's actual execution time dynamically affects scheduling order, maximizing parallelism.
 
-## 项目结构
+## Project Structure
 
 ```
 parallel/
-├── schedule.go        # 调度器核心实现
-├── step.go            # Step 接口定义
-├── error.go           # PanicError 类型
-├── generate_graph.go  # Mermaid 依赖图生成
-└── schedule_test.go   # 测试用例
+├── schedule.go        # Scheduler core
+├── step.go            # Step interface
+├── error.go           # PanicError type
+├── generate_graph.go  # Mermaid graph generation
+└── schedule_test.go   # Tests
 ```
 
 ## License
