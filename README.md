@@ -1,78 +1,132 @@
 # parallel-schedule
 
-**轻量级并行调度框架**
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## 目标
+轻量级 Go 并行任务调度框架，基于 DAG（有向无环图）自动分析依赖关系，最大限度并行执行任务。
 
-- 动作由用户自定义(不限于 RPC)
-- 最大限度并行执行
-- 依赖死循环自检
-- 输入依赖关系后自动进行调度，无需控制先后
-- 可控中断，某一步失败，可以中断/不中断执行
-  - 处理 goroutine 中的 panic
+## 特性
 
-## 怎么使用
+- **自动调度** — 只需定义依赖关系，框架自动进行拓扑排序并最大化并行执行
+- **动态拓扑排序** — 非 BFS 分层执行，避免层间阻塞，提升并发度
+- **环检测** — 启动前 DFS 检测循环依赖，快速失败
+- **错误中断** — 任一步骤失败立即中断后续执行，返回错误
+- **Panic 恢复** — goroutine 内 panic 被捕获并转为 error 返回
+- **依赖图生成** — 一键生成 Mermaid 流程图，可视化依赖关系
 
-只要把依赖关系定义好，就能够自动分析依赖，最大限度并行执行。
+## 安装
 
-例如有以下依赖关系：
+```bash
+go get github.com/duskbat/parallel-schedule
+```
+
+## 快速开始
+
+### 1. 定义数据总线
+
+数据总线用于在各步骤之间传递数据，由使用方自定义：
+
+```go
+type MyDataBus struct {
+    UserID   int
+    UserName string
+    Result   string
+}
+```
+
+### 2. 实现 Step 接口
+
+每个步骤实现 `Step` 接口，**注意每个步骤必须是不同的类型**（类型名作为调度 key）：
+
+```go
+type StepFetchUser struct {
+    Data *MyDataBus
+}
+
+func (s *StepFetchUser) Process(ctx context.Context) error {
+    // 执行具体逻辑，如 RPC 调用、数据库查询等
+    s.Data.UserName = "Alice"
+    return nil
+}
+
+type StepFetchOrder struct {
+    Data *MyDataBus
+}
+
+func (s *StepFetchOrder) Process(ctx context.Context) error {
+    s.Data.Result = fmt.Sprintf("order of %s", s.Data.UserName)
+    return nil
+}
+```
+
+### 3. 定义依赖并启动
+
+```go
+bus := &MyDataBus{UserID: 1}
+
+s1 := &StepFetchUser{Data: bus}
+s2 := &StepFetchOrder{Data: bus}
+s3 := &StepNotify{Data: bus}
+
+err := parallel.InitScheduler().
+    AddDependency(s1, s2).  // s1 完成后执行 s2
+    AddDependency(s1, s3).  // s1 完成后执行 s3（s2、s3 并行）
+    Launch(context.Background())
+
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+上述依赖关系对应的执行流程：
 
 ```mermaid
 flowchart LR
-    s1 --> s2
-    s2 --> s3
-    s2 --> s4
-    s1 --> s5
-    s5 --> s6
-    s3 --> s6
-    s4 --> s6
+    StepFetchUser --> StepFetchOrder
+    StepFetchUser --> StepNotify
 ```
 
-依赖关系输入：
+### 4. 生成依赖图（可选）
+
+开发调试时可生成 Mermaid 流程图文件：
 
 ```go
-myDataBus := &MyDataBus{}
-s1 := &MyStep1{Input: myDataBus}
-s2 := &MyStep2{Input: myDataBus}
-s3 := &MyStep3{Input: myDataBus}
-s4 := &MyStep4{Input: myDataBus}
-s5 := &MyStep5{Input: myDataBus}
-s6 := &MyStep6{Input: myDataBus}
 scheduler := parallel.InitScheduler().
-AddDependency(s1, s2).
-AddDependency(s1, s5).
-AddDependency(s2, s3).
-AddDependency(s2, s4).
-AddDependency(s5, s6).
-AddDependency(s3, s6).
-AddDependency(s4, s6)
+    AddDependency(s1, s2).
+    AddDependency(s1, s3)
+
+scheduler.GenerateGraphLR("graph.md") // 从左到右
+scheduler.GenerateGraphTB("graph.md") // 从上到下
 ```
 
-其中 dataBus 作为数据总线，dataBus 由使用方自定义，数据的传递依托于 dataBus
+> 生成完成后请删除 `GenerateGraph` 调用，该方法会调用 `os.Exit(1)`。
 
-## 设计与实现
+## 设计原理
 
-### 如何自动调度
+### 调度流程
 
-调度器首先会分析依赖关系，确认是有向无环图(DAG).
+1. 构建邻接表和入度表
+2. DFS 检测循环依赖
+3. 启动所有入度为 0 的节点（无依赖的节点并行执行）
+4. 节点完成后放入完成队列（channel），消费队列触发后续节点
+5. 邻接节点入度减为 0 时立即异步执行
+6. 所有节点完成或出现 error 时结束
 
-然后遍历入度为 0 的节点，开始并行执行，执行完的节点放进**完成队列**中，同时消费**完成队列**中的节点，遍历其邻接节点，如果邻接节点没有其他依赖，就会异步执行。直到所有节点执行完毕或者出现中断。
-中断通过返回 error 实现。
+### 为什么不用 BFS
 
-执行过程是动态的拓扑排序，每个节点的执行时长都会影响顺序。  
-并**不是**BFS，BFS 每层之间会出现阻塞，影响并发度。
+BFS 按层执行，每层之间存在同步阻塞。本框架采用动态拓扑排序，节点完成即触发后续，每个节点的实际执行时长动态影响调度顺序，最大化并行度。
 
-### 死循环自检
+## 项目结构
 
-会 DFS 检测依赖中是否有死循环。
+```
+parallel/
+├── schedule.go        # 调度器核心实现
+├── step.go            # Step 接口定义
+├── error.go           # PanicError 类型
+├── generate_graph.go  # Mermaid 依赖图生成
+└── schedule_test.go   # 测试用例
+```
 
-### 完成队列
+## License
 
-完成队列是实现的关键，完成队列是一个阻塞队列，执行完的节点都会先 add 进队列中，同时消费队列去触发执行邻接节点。  
-队列要保证线程安全，用 channels。
-
-> chan 在这里很适用
-
-### error chan
-
-在消费完成队列的同时也消费 error，一旦有 error 就中断执行并返回。
+[MIT](LICENSE) - Copyright (c) 2025 Weiye Mu
