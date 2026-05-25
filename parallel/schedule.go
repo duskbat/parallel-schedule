@@ -7,10 +7,10 @@ import (
 )
 
 type Scheduler struct {
-	dependencies  [][2]Step                      // 依赖关系
-	table         map[string]Step                // 映射
-	adjacencyList map[string]map[string]struct{} // 邻接表
-	inDegrees     map[string]int                 // 入度
+	dependencies  [][2]Step                      // 依赖关系 / dependencies
+	table         map[string]Step                // 映射 / step lookup table
+	adjacencyList map[string]map[string]struct{} // 邻接表 / adjacency list
+	inDegrees     map[string]int                 // 入度 / in-degree table
 }
 
 func InitScheduler() *Scheduler {
@@ -45,6 +45,9 @@ func (d *Scheduler) init() error {
 	}
 	visit := make(map[string]int)
 	for k := range d.table {
+		if visit[k] != 0 {
+			continue
+		}
 		if err := d.checkEndlessLoop(k, visit); err != nil {
 			return err
 		}
@@ -52,7 +55,7 @@ func (d *Scheduler) init() error {
 	return nil
 }
 
-// 死循环自检 防呆傻
+// 死循环自检 / cycle detection via DFS
 func (d *Scheduler) checkEndlessLoop(k string, visit map[string]int) error {
 	visit[k] = -1
 	if children, ok := d.adjacencyList[k]; ok {
@@ -79,7 +82,7 @@ func (d *Scheduler) Launch(ctx context.Context) (res error) {
 	l := len(d.table)
 	finishChan := make(chan string, l)
 	errorChan := make(chan error, l)
-	// 分析依赖关系，拓扑排序
+	// 分析依赖关系，拓扑排序 / analyze dependencies, topological sort
 	for k, in := range d.inDegrees {
 		if len(errorChan) > 0 {
 			res = <-errorChan
@@ -91,6 +94,7 @@ func (d *Scheduler) Launch(ctx context.Context) (res error) {
 				err1 := d.table[k].Process(ctx)
 				if err1 != nil {
 					errorChan <- err1
+					return
 				}
 				finishChan <- k
 			}()
@@ -112,6 +116,7 @@ func (d *Scheduler) Launch(ctx context.Context) (res error) {
 						err2 := d.table[child].Process(ctx)
 						if err2 != nil {
 							errorChan <- err2
+							return
 						}
 						finishChan <- child
 					}()

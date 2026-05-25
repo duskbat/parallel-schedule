@@ -6,24 +6,25 @@ import (
 	"strings"
 )
 
-// GenerateGraphLR 生成 markdown 流程图，从左到右
+// GenerateGraphLR 生成 markdown 流程图，从左到右 / generate Mermaid flowchart, left to right
 func (d *Scheduler) GenerateGraphLR(fileName string) error {
 	return d.GenerateGraph(fileName, "LR")
 }
 
-// GenerateGraphTB 生成 markdown 流程图，从上到下
+// GenerateGraphTB 生成 markdown 流程图，从上到下 / generate Mermaid flowchart, top to bottom
 func (d *Scheduler) GenerateGraphTB(fileName string) error {
 	return d.GenerateGraph(fileName, "TB")
 }
 
 // GenerateGraph 调用该方法生成 markdown 文件，可以直接渲染成依赖图。本地生成完后请删除该方法调用
+// Generates a markdown file with a Mermaid dependency graph. Remove this call after generation
 func (d *Scheduler) GenerateGraph(fileName string, direction string) error {
 	defer func() {
-		fmt.Println("请删除 parallel.GenerateGraph 方法调用")
+		fmt.Println("请删除 parallel.GenerateGraph 方法调用 / please remove the GenerateGraph call")
 		os.Exit(1)
 	}()
 	if len(fileName) == 0 {
-		fileName = "graph.md" // 默认当前路径
+		fileName = "graph.md" // 默认当前路径 / default to current directory
 	}
 	f, err1 := os.Create(fileName)
 	if err1 != nil {

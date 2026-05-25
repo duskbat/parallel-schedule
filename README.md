@@ -3,6 +3,8 @@
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
+[English](README_EN.md)
+
 轻量级 Go 并行任务调度框架，基于 DAG（有向无环图）自动分析依赖关系，最大限度并行执行任务。
 
 ## 特性
@@ -10,7 +12,7 @@
 - **自动调度** — 只需定义依赖关系，框架自动进行拓扑排序并最大化并行执行
 - **动态拓扑排序** — 非 BFS 分层执行，避免层间阻塞，提升并发度
 - **环检测** — 启动前 DFS 检测循环依赖，快速失败
-- **错误中断** — 任一步骤失败立即中断后续执行，返回错误
+- **错误中断** — 任一步骤失败后不再触发新的后续步骤，返回错误
 - **Panic 恢复** — goroutine 内 panic 被捕获并转为 error 返回
 - **依赖图生成** — 一键生成 Mermaid 流程图，可视化依赖关系
 
